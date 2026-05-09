@@ -24,35 +24,51 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          # Mol* and Vite 8 / rolldown both want Node >= 22.12
           node-version: '22.x'
           cache: npm
 
-      - name: Show toolchain versions
-        run: |
-          echo "node:    $(node --version)"
-          echo "npm:     $(npm --version)"
-
-      - name: Install dependencies
-        run: npm ci --include=optional
-
-      - name: Build
+      - name: Build (install + tsc + vite, all output to ci.log)
         id: build
+        shell: bash
         run: |
           set -o pipefail
           mkdir -p .ci-out
-          npm run build 2>&1 | tee .ci-out/build.log
+          {
+            echo "::group::toolchain"
+            echo "node: $(node --version)"
+            echo "npm:  $(npm --version)"
+            echo "tsc:  $(npx -y tsc --version 2>&1 || true)"
+            echo "::endgroup::"
 
-      - name: Surface build output (always)
+            echo "::group::npm ci"
+            npm ci 2>&1
+            echo "::endgroup::"
+
+            echo "::group::npm run build"
+            npm run build 2>&1
+            echo "::endgroup::"
+          } | tee .ci-out/ci.log
+
+      - name: Surface ci.log to step summary (always)
         if: always()
+        shell: bash
         run: |
           {
-            echo "## Build output"
+            echo "## CI log"
             echo
             echo '```'
-            tail -200 .ci-out/build.log 2>/dev/null || echo "(no log)"
+            tail -300 .ci-out/ci.log 2>/dev/null || echo "(no log)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload ci.log as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-log
+          path: .ci-out/ci.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Configure Pages
         if: success()
@@ -65,7 +81,6 @@ jobs:
           path: dist
 
   deploy:
-    # Only deploy from master so feature-branch runs don't replace the live site.
     if: github.ref == 'refs/heads/master'
     needs: build
     runs-on: ubuntu-latest
