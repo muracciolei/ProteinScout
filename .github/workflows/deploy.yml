@@ -24,8 +24,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
-          cache: npm
+          # Match the local toolchain that produces a clean build (Node 24).
+          # Cache deliberately disabled — it was masking the real install error.
+          node-version: '24.x'
 
       - name: Build (install + tsc + vite, all output to ci.log)
         id: build
