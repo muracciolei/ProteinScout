@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [master]
+    branches: [master, claude/vigorous-mendel-f70976]
   workflow_dispatch:
 
 permissions:
@@ -24,25 +24,49 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          # molstar requires Node >= 22 (see node_modules/molstar/package.json#engines).
-          node-version: 22
+          # Mol* and Vite 8 / rolldown both want Node >= 22.12
+          node-version: '22.x'
           cache: npm
 
+      - name: Show toolchain versions
+        run: |
+          echo "node:    $(node --version)"
+          echo "npm:     $(npm --version)"
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: Build
-        run: npm run build
+        id: build
+        run: |
+          set -o pipefail
+          mkdir -p .ci-out
+          npm run build 2>&1 | tee .ci-out/build.log
+
+      - name: Surface build output (always)
+        if: always()
+        run: |
+          {
+            echo "## Build output"
+            echo
+            echo '```'
+            tail -200 .ci-out/build.log 2>/dev/null || echo "(no log)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Configure Pages
+        if: success()
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
+        if: success()
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
+    # Only deploy from master so feature-branch runs don't replace the live site.
+    if: github.ref == 'refs/heads/master'
     needs: build
     runs-on: ubuntu-latest
     environment:
