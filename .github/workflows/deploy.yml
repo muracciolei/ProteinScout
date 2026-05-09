@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [master]
+    branches: [master, claude/vigorous-mendel-f70976]
   workflow_dispatch:
 
 permissions:
@@ -24,25 +24,65 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          # molstar requires Node >= 22 (see node_modules/molstar/package.json#engines).
-          node-version: 22
-          cache: npm
+          # Match the local toolchain that produces a clean build (Node 24).
+          # Cache deliberately disabled — it was masking the real install error.
+          node-version: '24.x'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Build (install + tsc + vite, all output to ci.log)
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p .ci-out
+          {
+            echo "::group::toolchain"
+            echo "node: $(node --version)"
+            echo "npm:  $(npm --version)"
+            echo "tsc:  $(npx -y tsc --version 2>&1 || true)"
+            echo "::endgroup::"
 
-      - name: Build
-        run: npm run build
+            echo "::group::npm ci"
+            npm ci 2>&1
+            echo "::endgroup::"
+
+            echo "::group::npm run build"
+            npm run build 2>&1
+            echo "::endgroup::"
+          } | tee .ci-out/ci.log
+
+      - name: Surface ci.log to step summary (always)
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## CI log"
+            echo
+            echo '```'
+            tail -300 .ci-out/ci.log 2>/dev/null || echo "(no log)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload ci.log as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-log
+          path: .ci-out/ci.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Configure Pages
+        if: success()
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
+        if: success()
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
+    if: github.ref == 'refs/heads/master'
     needs: build
     runs-on: ubuntu-latest
     environment:
